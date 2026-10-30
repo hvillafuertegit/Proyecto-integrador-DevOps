@@ -1,4 +1,5 @@
 import { apiRequest } from './services/http.js';
+import { buildIncidentQuery } from './services/incident-query.js';
 import LoginPage from './components/LoginPage.jsx';
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -13,6 +14,7 @@ function App() {
     const [user, setUser] = useState(JSON.parse(localStorage.getItem('hub_user') || 'null'));
     const [page, setPage] = useState('Inicio');
     const [incidents, setIncidents] = useState([]);
+    const [filteredIncidents, setFilteredIncidents] = useState([]);
     const [users, setUsers] = useState([]);
     const [categories, setCategories] = useState([]);
     const [summary, setSummary] = useState({ statuses: [], categories: [] });
@@ -42,6 +44,35 @@ function App() {
     } }
     useEffect(() => { if (token)
         refresh(); }, [token]);
+    useEffect(() => {
+        if (!token || (page !== 'Incidentes' && page !== 'Mis asignaciones')) return;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(async () => {
+            const technician = page === 'Mis asignaciones' ? user?.id : techFilter;
+            const query = buildIncidentQuery({
+                status: filter,
+                priority: priorityFilter,
+                category: categoryFilter,
+                technician,
+                q: search,
+            });
+
+            try {
+                const path = query ? '/incidents?' + query : '/incidents';
+                const rows = await request(path, { signal: controller.signal });
+                setFilteredIncidents(rows);
+            } catch (err) {
+                if (err.name !== 'AbortError') setError(err.message);
+            }
+        }, 250);
+
+        return () => {
+            clearTimeout(timeout);
+            controller.abort();
+        };
+    }, [token, page, filter, priorityFilter, categoryFilter, techFilter, search, user?.id, incidents]);
+
     async function signIn(e) { e.preventDefault(); setError(''); try {
         const r = await fetch(API + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(login) });
         const d = await r.json();
@@ -77,7 +108,7 @@ function App() {
     if (!token)
         return <LoginPage login={login} setLogin={setLogin} signIn={signIn} error={error}/>;
     const tabs = ['Inicio', 'Incidentes', 'Mis asignaciones', ...(user?.role === 'ADMIN' ? ['Usuarios', 'Categorías'] : [])];
-    const shown = incidents.filter(i => (page !== 'Mis asignaciones' || i.technician_id === user.id) && (!filter || i.status === filter) && (!priorityFilter || i.priority === priorityFilter) && (!categoryFilter || String(i.category_id) === categoryFilter) && (!techFilter || String(i.technician_id) === techFilter) && (!search || `${i.title} ${i.category} ${i.id}`.toLowerCase().includes(search.toLowerCase())));
+    const shown = filteredIncidents;
     return <div className="app"><Sidebar tabs={tabs} page={page} user={user} setPage={setPage} setSelected={setSelected} setError={setError} logout={logout}/><main><header className="top"><span>Centro de soporte / {page}</span><span className="avatar">{user?.name?.slice(0, 1)}</span></header><div className="content">{error && <div className="error banner" onClick={() => setError('')}>{error} ×</div>}
     {page === 'Inicio' && <DashboardPage incidents={incidents} summary={summary} count={count} setPage={setPage} openIncident={openIncident}/>}
     {(page === 'Incidentes' || page === 'Mis asignaciones') && <IncidentsPage page={page} setPage={setPage} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} priorityFilter={priorityFilter} setPriorityFilter={setPriorityFilter} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} techFilter={techFilter} setTechFilter={setTechFilter} users={users} categories={categories} shown={shown} openIncident={openIncident}/>}
