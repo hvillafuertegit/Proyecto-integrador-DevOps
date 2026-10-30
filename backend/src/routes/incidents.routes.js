@@ -4,35 +4,15 @@ import { safe } from '../middleware/errors.js';
 import { auth, roles } from '../middleware/auth.js';
 import { statuses } from '../utils/constants.js';
 import { validateIncident } from '../utils/incident-validation.js';
+import { buildIncidentFilters } from '../utils/incident-filters.js';
 
 const router = Router();
 
 async function listIncidents(req, res) {
-  const { status, priority, category, technician, q } = req.query;
-  const filters = [];
-  const params = [];
-
-  function addFilter(column, value) {
-    params.push(value);
-    filters.push(`${column} = $${params.length}`);
-  }
-
-  if (status) addFilter('i.status', status);
-  if (priority) addFilter('i.priority', priority);
-  if (category) addFilter('i.category_id', Number(category));
-  if (technician) addFilter('i.technician_id', Number(technician));
-
-  if (q) {
-    params.push(`%${q}%`);
-    const index = params.length;
-    filters.push(`(i.title ILIKE $${index} OR i.description ILIKE $${index})`);
-  }
-
-  if (req.user.role === 'USER') {
-    addFilter('i.reporter_id', req.user.id);
-  }
-
-  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  const { where, params } = buildIncidentFilters(
+  req.query,
+  req.user
+);
   const sql = `
     SELECT i.*, c.name AS category, u.name AS reporter, t.name AS technician
     FROM incidents i
